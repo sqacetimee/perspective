@@ -71,7 +71,7 @@ export default function ChatPage() {
       out.push({
         role: "system",
         title: "Welcome",
-        content: "Ask a question below to start.",
+        content: "What's on your mind today?",
       });
       if (chat.error) out.push({ role: "system", title: "Error", content: chat.error });
       return out;
