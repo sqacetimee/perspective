@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
-import { motion } from "framer-motion";
+import React, { useState, useTransition } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useRouter } from "next/navigation";
 
 import Navbar from "@/components/home/Navbar";
 import Footer from "@/components/home/Footer";
@@ -18,6 +19,16 @@ import RightRail from "@/components/backgrounds/RightRail";
 
 export default function Home() {
   const [email, setEmail] = useState("");
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [navLoading, setNavLoading] = useState(false);
+
+  const goChat = () => {
+    setNavLoading(true);
+    startTransition(() => {
+      router.push("/chat");
+    });
+  };
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#07080B] text-zinc-100">
@@ -30,6 +41,33 @@ export default function Home() {
       <ParticlesSafe />
       <CursorOrbs />
       <RightRail />
+
+      <AnimatePresence>
+        {navLoading && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="pointer-events-none fixed inset-0 z-[60] bg-[#07080B]/70 backdrop-blur-md"
+          >
+            <div className="absolute inset-0 flex items-center justify-center">
+              <motion.div
+                initial={{ opacity: 0, y: 10, filter: "blur(8px)" }}
+                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)]"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="relative inline-flex h-3 w-3">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-200/60" />
+                    <span className="relative inline-flex h-3 w-3 rounded-full bg-rose-200" />
+                  </span>
+                  <div className="text-sm text-zinc-200">Loading chat…</div>
+                </div>
+              </motion.div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="relative mx-auto max-w-6xl px-6 pb-20 pt-8 md:pt-10">
         <Navbar />
@@ -120,9 +158,16 @@ export default function Home() {
             transition={{ duration: 0.8, delay: 0.45 }}
             className="mt-6 flex items-center justify-center gap-3"
           >
-            <button className="rounded-xl border border-white/10 bg-white/5 px-5 py-2.5 text-sm text-zinc-200 backdrop-blur-xl hover:bg-white/10 transition">
-              Try it now →
-            </button>
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={goChat}
+              disabled={isPending}
+              className="rounded-xl border border-white/10 bg-white/5 px-5 py-2.5 text-sm text-zinc-200 backdrop-blur-xl hover:bg-white/10 transition disabled:opacity-50"
+            >
+              {isPending ? "Opening…" : "Try it now →"}
+            </motion.button>
+
             <button className="rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-zinc-950 hover:bg-zinc-200 transition">
               Watch demo
             </button>

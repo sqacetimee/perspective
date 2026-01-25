@@ -1,222 +1,309 @@
-'use client';
+"use client";
 
-import { useState, useRef, useEffect } from 'react';
-import { useMultiPerspectiveChat, ChatMessage } from '@/components/home/useMultiPerspectiveChat';
-import { ProgressIndicator } from '@/components/chat/ProgressIndicator';
-import { AgentDebateViewer } from '@/components/chat/AgentDebateViewer';
+import React, { useMemo, useRef, useState, useEffect } from "react";
+import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
 
-type SystemStatus = 'healthy' | 'degraded' | 'error';
+import Navbar from "@/components/home/Navbar";
+import Footer from "@/components/home/Footer";
+import StyleKeyframes from "@/components/home/StyleKeyframes";
 
-export default function ChatPage() {
-    const { initSession, submitClarification, messages, state, error, progress, rounds, currentRound } = useMultiPerspectiveChat();
-    const [input, setInput] = useState('');
-    const [clarificationInput, setClarificationInput] = useState('');
-    const [systemStatus, setSystemStatus] = useState<SystemStatus>('healthy');
-    const bottomRef = useRef<HTMLDivElement>(null);
+import PrismaticBackdrop from "@/components/backgrounds/PrismaticBackdrop";
+import Aurora from "@/components/backgrounds/Aurora";
+import GridAndVignette from "@/components/backgrounds/GridAndVignette";
+import NoiseFilm from "@/components/backgrounds/NoiseFilm";
+import ParticlesSafe from "@/components/backgrounds/ParticlesSafe";
+import CursorOrbs from "@/components/backgrounds/CursorOrbs";
+import RightRail from "@/components/backgrounds/RightRail";
 
-    // Poll health info
-    useEffect(() => {
-        const checkHealth = async () => {
-            try {
-                const res = await fetch('/api/health');
-                const data = await res.json();
-                setSystemStatus(data.status as SystemStatus);
-            } catch (e) {
-                setSystemStatus('error');
-            }
-        };
+import AgentDebateViewer from "@/components/chat/AgentDebateViewer";
+import ProgressIndicator from "@/components/chat/ProgressIndicator";
+import { useMultiPerspectiveChat } from "@/components/home/useMultiPerspectiveChat";
 
-        checkHealth();
-        const interval = setInterval(checkHealth, 30000);
-        return () => clearInterval(interval);
-    }, []);
-
-    // Auto-scroll to bottom
-    useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, state]);
-
-    const handleStart = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!input.trim()) return;
-        await initSession(input);
-    };
-
-    const handleClarify = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!clarificationInput.trim()) return;
-        await submitClarification(clarificationInput);
-    };
-
-    return (
-        <div className="min-h-screen bg-black text-white p-4 md:p-8 font-sans">
-            <div className="max-w-4xl mx-auto space-y-8">
-
-                {/* Header */}
-                <header className="border-b border-gray-800 pb-4 flex justify-between items-start">
-                    <div>
-                        <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-                            Multi-Perspective AI
-                        </h1>
-                        <p className="text-gray-400 mt-2">
-                            Status: <span className="font-mono text-sm px-2 py-1 rounded bg-gray-900 border border-gray-700">{state}</span>
-                        </p>
-                    </div>
-
-                    <div className="flex items-center space-x-2 bg-gray-900 px-3 py-1.5 rounded-full border border-gray-800">
-                        <div className={`w-3 h-3 rounded-full ${systemStatus === 'healthy' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' :
-                            systemStatus === 'degraded' ? 'bg-yellow-500 shadow-[0_0_8px_rgba(234,179,8,0.6)]' :
-                                'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]'
-                            }`} />
-                        <span className={`text-xs font-mono uppercase ${systemStatus === 'healthy' ? 'text-green-400' :
-                            systemStatus === 'degraded' ? 'text-yellow-400' :
-                                'text-red-400'
-                            }`}>
-                            {systemStatus}
-                        </span>
-                    </div>
-                </header>
-
-                {/* Error Display */}
-                {error && (
-                    <div className="p-4 bg-red-900/50 border border-red-700 rounded text-red-200">
-                        Error: {error}
-                    </div>
-                )}
-
-                {/* Initial Input */}
-                {state === 'INIT' && (
-                    <form onSubmit={handleStart} className="space-y-4">
-                        <div className="space-y-2">
-                            <label className="block text-lg text-gray-300">What's on your mind?</label>
-                            <textarea
-                                value={input}
-                                onChange={(e) => setInput(e.target.value)}
-                                className="w-full h-32 bg-gray-900 border border-gray-800 rounded p-4 text-white focus:outline-none focus:border-blue-500 transition-colors"
-                                placeholder="Describe your situation..."
-                                required
-                            />
-                        </div>
-                        <button
-                            type="submit"
-                            className="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded font-medium transition-colors"
-                        >
-                            Start Analysis
-                        </button>
-                    </form>
-                )}
-
-                {/* Progress Indicator - Show during processing states */}
-                {['INIT', 'CLARIFICATION_PENDING', 'CLARIFICATION_COMPLETE', 'ROUND_PROCESSING', 'SYNTHESIS_PROCESSING'].includes(state) && state !== 'COMPLETE' && (
-                    <ProgressIndicator
-                        stage={progress.stage || state.toLowerCase()}
-                        percent={progress.percent || (state === 'CLARIFICATION_PENDING' ? 10 : state === 'ROUND_PROCESSING' ? 50 : 5)}
-                        description={progress.description || `Status: ${state}`}
-                    />
-                )}
-
-                {/* Agent Debate Viewer - Show during/after rounds */}
-                {(state === 'ROUND_PROCESSING' || state === 'SYNTHESIS_PROCESSING' || state === 'COMPLETE') && (
-                    <AgentDebateViewer
-                        rounds={rounds}
-                        currentRound={currentRound}
-                        isProcessing={state !== 'COMPLETE'}
-                    />
-                )}
-
-                {/* Chat Stream */}
-                <div className="space-y-6">
-                    {messages
-                        .filter(msg => {
-                            // Hide clarification questions after they are answered
-                            if (msg.agent === 'CLARIFICATION' && state !== 'CLARIFICATION_PENDING') {
-                                return false;
-                            }
-                            return true;
-                        })
-                        .map((msg, idx) => (
-                            <MessageItem key={idx} message={msg} />
-                        ))}
-
-                    {/* Clarification Input Form */}
-                    {state === 'CLARIFICATION_PENDING' && (
-                        <div className="animate-fade-in space-y-4 border-t border-gray-800 pt-6">
-                            <h3 className="text-xl text-yellow-400 font-semibold">Clarification Required</h3>
-                            <p className="text-gray-400">Please answer the questions above to proceed.</p>
-                            <form onSubmit={handleClarify} className="space-y-4">
-                                <textarea
-                                    value={clarificationInput}
-                                    onChange={(e) => setClarificationInput(e.target.value)}
-                                    className="w-full h-48 bg-gray-900 border border-yellow-900/50 rounded p-4 text-white focus:outline-none focus:border-yellow-500 transition-colors"
-                                    placeholder="Your answers..."
-                                    required
-                                />
-                                <button
-                                    type="submit"
-                                    className="px-6 py-2 bg-yellow-600 hover:bg-yellow-500 text-black font-bold rounded transition-colors"
-                                >
-                                    Submit Answers
-                                </button>
-                            </form>
-                        </div>
-                    )}
-
-                    {/* Loading Indicators */}
-                    {(state === 'ROUND_PROCESSING' || state === 'SYNTHESIS_PROCESSING') && (
-                        <div className="flex items-center space-x-2 text-gray-500 animate-pulse">
-                            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                            <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
-                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                            <span>Processing...</span>
-                        </div>
-                    )}
-                </div>
-
-                <div ref={bottomRef} />
-            </div>
-        </div>
-    );
+function cn(...s: Array<string | false | undefined | null>) {
+  return s.filter(Boolean).join(" ");
 }
 
-function MessageItem({ message }: { message: ChatMessage }) {
-    const isAgentA = message.agent === 'A';
-    const isAgentB = message.agent === 'B';
-    const isSynthesis = message.type === 'synthesis' || message.agent === 'SYNTHESIS';
-    const isClarification = message.agent === 'CLARIFICATION';
+function ChatBubble({
+  role,
+  title,
+  content,
+}: {
+  role: "system" | "agent" | "synthesis";
+  title: string;
+  content: string;
+}) {
+  const base = "rounded-2xl border p-3 backdrop-blur-xl";
+  const styles =
+    role === "synthesis"
+      ? "border-emerald-400/20 bg-emerald-500/10"
+      : role === "system"
+      ? "border-white/10 bg-white/[0.06]"
+      : "border-white/10 bg-black/20";
 
-    let borderColor = 'border-gray-800';
-    let title = 'System';
-    let textColor = 'text-gray-300';
-    let bgColor = 'bg-gray-900/50';
+  return (
+    <div className={cn(base, styles)}>
+      <div className="mb-1 text-xs font-semibold text-zinc-200">{title}</div>
+      <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-100/90">
+        {content}
+      </div>
+    </div>
+  );
+}
 
-    if (isAgentA) {
-        borderColor = 'border-blue-500/50';
-        title = `Round ${message.round} | Expansion Agent`;
-        textColor = 'text-blue-100';
-        bgColor = 'bg-blue-900/20';
-    } else if (isAgentB) {
-        borderColor = 'border-purple-500/50';
-        title = `Round ${message.round} | Compression Agent`;
-        textColor = 'text-purple-100';
-        bgColor = 'bg-purple-900/20';
-    } else if (isSynthesis) {
-        borderColor = 'border-green-500';
-        title = 'Final Synthesis';
-        textColor = 'text-green-100';
-        bgColor = 'bg-green-900/30';
-    } else if (isClarification) {
-        borderColor = 'border-yellow-500/50';
-        title = 'Clarification Phase';
-        textColor = 'text-yellow-100';
-        bgColor = 'bg-yellow-900/20';
+export default function ChatPage() {
+  const chat = useMultiPerspectiveChat();
+
+  const [input, setInput] = useState("");
+  const [clarify, setClarify] = useState("");
+  const [showAIConversation, setShowAIConversation] = useState(false);
+
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+
+  const feed = useMemo(() => {
+    const out: Array<{
+      role: "system" | "agent" | "synthesis";
+      title: string;
+      content: string;
+    }> = [];
+
+    if (!chat.sessionId) {
+      out.push({
+        role: "system",
+        title: "Welcome",
+        content: "Ask a question below to start.",
+      });
+      if (chat.error) out.push({ role: "system", title: "Error", content: chat.error });
+      return out;
     }
 
-    return (
-        <div className={`border ${borderColor} rounded-lg p-6 ${bgColor} transition-all duration-300 hover:border-opacity-100`}>
-            <div className="text-xs uppercase tracking-widest opacity-70 mb-2">{title}</div>
-            <div className={`whitespace-pre-wrap ${textColor} leading-relaxed font-light`}>
-                {message.content}
-            </div>
+    out.push({
+      role: "system",
+      title: "Session",
+      content: `Connected • ${chat.sessionId.slice(0, 8)}… • State: ${chat.state}`,
+    });
+
+    for (const m of chat.messages) {
+      if (!m.content) continue;
+
+      if (m.agent === "CLARIFICATION") {
+        out.push({ role: "system", title: "Clarification", content: m.content });
+      } else if (m.agent === "SYNTHESIS" || m.type === "synthesis") {
+        out.push({ role: "synthesis", title: "Synthesis", content: m.content });
+      } else if (m.type === "agent_output") {
+        const name =
+          m.agent === "EXPANSION"
+            ? "Agent A"
+            : m.agent === "COMPRESSION"
+            ? "Agent B"
+            : m.agent || "Agent";
+        out.push({ role: "agent", title: name, content: m.content });
+      }
+    }
+
+    if (chat.error) out.push({ role: "system", title: "Error", content: chat.error });
+    return out;
+  }, [chat.messages, chat.sessionId, chat.state, chat.error]);
+
+  const clarificationPending = chat.state === "CLARIFICATION_PENDING";
+
+  useEffect(() => {
+    if (!scrollerRef.current) return;
+    scrollerRef.current.scrollTop = scrollerRef.current.scrollHeight;
+  }, [feed.length, clarificationPending]);
+
+  const start = async () => {
+    const t = input.trim();
+    if (!t) return;
+    setInput("");
+    setClarify("");
+    await chat.initSession(t);
+  };
+
+  const submitClarification = async () => {
+    const t = clarify.trim();
+    if (!t) return;
+    await chat.submitClarification(t);
+    setClarify("");
+  };
+
+  const isProcessing =
+    !!chat.sessionId && chat.state !== "COMPLETE" && chat.state !== "ERROR";
+
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-[#07080B] text-zinc-100">
+      <StyleKeyframes />
+      <PrismaticBackdrop />
+      <Aurora />
+      <GridAndVignette />
+      <NoiseFilm />
+      <ParticlesSafe />
+      <CursorOrbs />
+      <RightRail />
+
+      <div className="relative mx-auto max-w-6xl px-6 pb-20 pt-8 md:pt-10">
+        <Navbar />
+
+        <div className="mt-8 flex items-center justify-between gap-4">
+          <div>
+            <Link
+              href="/"
+              className="text-sm text-zinc-400 hover:text-zinc-200 transition"
+            >
+              ← Back
+            </Link>
+
+            <motion.h1
+              initial={{ opacity: 0, y: 10, filter: "blur(10px)" }}
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              transition={{ duration: 0.8, ease: [0.2, 0.8, 0.2, 1] }}
+              className="mt-2 text-3xl font-semibold tracking-tight"
+            >
+              Perspective Chat
+            </motion.h1>
+          </div>
+
+          <motion.button
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => setShowAIConversation((v) => !v)}
+            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-zinc-200 backdrop-blur-xl hover:bg-white/10 transition"
+          >
+            {showAIConversation ? "Hide AI conversation" : "View AI Conversation"}
+          </motion.button>
         </div>
-    );
+
+        {/* AI convo pops ABOVE */}
+        <AnimatePresence>
+          {showAIConversation && (
+            <motion.div
+              initial={{ opacity: 0, y: -8, filter: "blur(10px)" }}
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              exit={{ opacity: 0, y: -8, filter: "blur(10px)" }}
+              transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
+              className="mt-6 mx-auto max-w-4xl rounded-3xl border border-white/10 bg-white/5 p-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl"
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <div className="text-sm font-semibold text-zinc-100">
+                  AI conversation (live)
+                </div>
+                <div className="text-xs text-zinc-500">
+                  {chat.sessionId ? (isProcessing ? "streaming" : "complete") : "waiting"}
+                </div>
+              </div>
+
+              <AgentDebateViewer
+                rounds={chat.rounds}
+                currentRound={chat.currentRound}
+                isProcessing={isProcessing}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Main chat box */}
+        <div className="mt-5 mx-auto max-w-4xl rounded-3xl border border-white/10 bg-white/5 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+          <div className="border-b border-white/10 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs text-zinc-400">
+                {chat.sessionId ? (
+                  <>
+                    Session{" "}
+                    <span className="text-zinc-200">
+                      {chat.sessionId.slice(0, 8)}…
+                    </span>{" "}
+                    • <span className="text-zinc-200">{chat.state}</span>
+                  </>
+                ) : (
+                  "No session"
+                )}
+                {chat.error ? (
+                  <span className="ml-2 text-rose-300">• {chat.error}</span>
+                ) : null}
+              </div>
+
+              <div className="hidden md:block w-[320px]">
+                <ProgressIndicator
+                  percent={chat.progress.percent}
+                  description={chat.progress.description}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div
+            ref={scrollerRef}
+            className="h-[48vh] md:h-[52vh] overflow-y-auto px-4 py-4 space-y-3"
+          >
+            {feed.map((m, idx) => (
+              <ChatBubble key={idx} role={m.role} title={m.title} content={m.content} />
+            ))}
+
+            {clarificationPending && (
+              <div className="rounded-2xl border border-yellow-400/20 bg-yellow-500/10 p-3">
+                <div className="text-xs font-semibold text-yellow-200">
+                  Answer clarification
+                </div>
+                <textarea
+                  value={clarify}
+                  onChange={(e) => setClarify(e.target.value)}
+                  rows={4}
+                  placeholder={"1) ...\n2) ...\n3) ..."}
+                  className="mt-2 w-full resize-none rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-white/20"
+                />
+                <div className="mt-3 flex justify-end">
+                  <motion.button
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={submitClarification}
+                    disabled={!clarify.trim()}
+                    className={cn(
+                      "rounded-xl px-4 py-2 text-sm font-semibold shadow transition",
+                      clarify.trim()
+                        ? "bg-white text-zinc-950 hover:bg-zinc-200"
+                        : "bg-white/10 text-zinc-500 cursor-not-allowed"
+                    )}
+                  >
+                    Submit
+                  </motion.button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Input */}
+          <div className="border-t border-white/10 p-3">
+            <div className="flex items-end gap-3 rounded-2xl border border-white/10 bg-black/20 p-2">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                rows={2}
+                placeholder="Message Perspective…"
+                className="flex-1 resize-none bg-transparent px-2 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+              />
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={start}
+                disabled={!input.trim()}
+                className={cn(
+                  "rounded-xl px-4 py-2 text-sm font-semibold shadow transition",
+                  input.trim()
+                    ? "bg-gradient-to-r from-rose-200 via-zinc-100 to-rose-100 text-zinc-950 hover:opacity-95"
+                    : "bg-white/10 text-zinc-500 cursor-not-allowed"
+                )}
+              >
+                Send
+              </motion.button>
+            </div>
+            <div className="mt-2 text-[11px] text-zinc-500">
+              Click “View AI Conversation” to watch agents live.
+            </div>
+          </div>
+        </div>
+
+        <Footer />
+      </div>
+    </div>
+  );
 }
