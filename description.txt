@@ -1,0 +1,531 @@
+# Technical Architecture Specification
+## Multi-Perspective AI Reasoning System with Structured Debate Mechanism
+
+---
+
+## 1. System Purpose and Design Philosophy
+
+This system implements a multi-agent reasoning architecture designed to generate balanced, multi-perspective analyses of user queries through structured internal debate. Unlike conventional single-pass AI systems that collapse input directly into output, this architecture enforces mandatory perspective plurality before convergence.
+
+The fundamental design principle addresses a critical failure mode in AI-assisted reasoning: premature certainty. Most systems operate on a linear transformation model where user input undergoes a single interpretive pass before generating a response. This architecture rejects that model entirely. Instead, it implements a dual-agent debate mechanism that forces competing analytical frameworks to challenge, refine, and strengthen each other across multiple iterations before synthesis.
+
+The system does not function as a conversational agent. Users never interact directly with the internal reasoning components. Rather, the architecture operates as a perspective-generation engine that processes user context through mandatory clarification, structured expansion-compression cycles, and final synthesis. The output represents a convergence of multiple validated interpretations rather than a single authoritative view.
+
+This approach proves particularly effective for domains characterized by interpretive ambiguity, emotional complexity, or contextual uncertainty—including personal relationships, identity exploration, ethical reasoning, and decision-making under incomplete information. The system explicitly prevents both emotional over-validation (which collapses into affirmation without agency) and rigid logical dominance (which invalidates emotional reality).
+
+## 2. High-Level Architecture Overview
+
+The system architecture comprises four primary components arranged in a linear control flow:
+
+**Frontend (Browser Interface)**: Provides user interaction surface exclusively. Handles message input, real-time streaming display, and final output presentation. Contains no reasoning logic.
+
+**Backend (Python Orchestrator)**: Implements the complete reasoning state machine. Controls prompt composition, round sequencing, state persistence, and all decision logic. Functions as the sole authority over reasoning flow.
+
+**Secure Tunnel (Tailscale/Private Network)**: Establishes encrypted communication channel between public-facing backend and private inference endpoint. Ensures model access remains isolated from public internet.
+
+**Inference Endpoint (Local Laptop GPU with Ollama)**: Executes stateless text generation. Receives fully-formed JSON prompts from backend, returns raw model output. Maintains no conversation history or state between requests.
+
+The architectural constraint is absolute: all intelligence resides in the backend. The model functions purely as a computational resource. This separation enables model-agnostic upgrades, deterministic behavior verification, and precise control over reasoning flow.
+
+The complete request path follows this sequence:
+```
+User → Frontend → Backend → Tailscale → Laptop (Ollama + Mistral 7B) → Backend → Frontend → User
+```
+
+All intermediate reasoning outputs can optionally stream back to the frontend, enabling real-time observability of the debate process.
+
+## 3. Component Responsibilities and Boundaries
+
+**Frontend Responsibilities:**
+- Render chat interface
+- Capture user input and clarification responses
+- Stream intermediate agent outputs (if enabled)
+- Display final synthesis
+- Maintain zero reasoning logic
+
+**Backend Responsibilities:**
+- Session state management (session ID, prompts, round outputs)
+- Prompt composition and templating
+- State machine implementation (init → clarification → debate rounds → synthesis)
+- Round counting and termination logic
+- Context assembly (merging user input with clarification answers)
+- Inference endpoint communication
+- Error handling and recovery
+- Optional output streaming to frontend
+
+**Laptop Inference Endpoint Responsibilities:**
+- Receive JSON-formatted prompts
+- Execute text generation using Mistral 7B v0.3 (Q4_K_M quantization)
+- Return raw model output
+- Maintain zero state between requests
+- Operate in isolation from public internet
+
+**Storage Layer (Text Files or PostgreSQL):**
+- Session state persistence
+- Round output history
+- User prompt and clarification storage
+- Minimal retention (session-scoped, ephemeral)
+
+The boundary enforcement principle is critical: the laptop never makes decisions about what prompt to run next, how many rounds remain, or when to terminate. These are backend responsibilities only.
+
+## 4. Prompt Types and Their Functional Roles
+
+The system employs four distinct prompt types, each serving a specific functional role in the reasoning pipeline.
+
+### 4.1 Clarification System Prompt (Prompt 0)
+
+**Purpose**: Extract ambiguity, missing context, and unstated assumptions before reasoning begins.
+
+**Input**: Raw user prompt only.
+
+**Output**: Customized clarification questions tailored to the specific user context.
+
+**Critical Constraint**: No reasoning or analysis occurs at this stage. The clarification prompt must not attempt to answer the user's question, only identify what additional information would improve reasoning quality.
+
+### 4.2 System Prompt A (Expansion Agent)
+
+**Core Energy**: Receptive, intuitive, emotionally aware, inward-focused.
+
+**Primary Function**: State-space expansion. Generates multiple plausible interpretations without premature certainty.
+
+**Operational Mode**: 
+- Maps emotional reality of the situation
+- Enumerates 3–5 plausible interpretations
+- Produces 3–5 possible actions (gentle → firm spectrum)
+- Generates 2 communication scripts (brief + extended)
+- Proposes one boundary statement phrased with care
+
+**Scanner Function**: Actively detects Wounded Masculine patterns in both the user scenario and opposing agent reasoning, including dominance/control masquerading as logic, confrontational certainty, emotional invalidation, and power-over framing.
+
+**Prohibited Behaviors**: Jumping to extreme conclusions, inventing facts, shaming either party, reducing complex situations to single explanations.
+
+### 4.3 System Prompt B (Compression Agent)
+
+**Core Energy**: Projective, active, clarity-focused, protective.
+
+**Primary Function**: Information compression under constraint. Converts expanded possibilities into grounded, actionable core.
+
+**Operational Mode**:
+- Selects best-supported interpretation (1–2 sentences)
+- Separates known facts from assumptions
+- Applies boundary/insecurity/values mismatch checklist
+- Produces one measurable, respectful boundary statement
+- Generates short + extended communication scripts
+- Defines if/then next steps based on partner response
+
+**Scanner Function**: Actively detects Wounded Feminine patterns in both the user scenario and opposing agent reasoning, including victim framing, neediness/co-dependency logic, manipulation through guilt or testing, and unstable conclusions based solely on intuition.
+
+**Prohibited Behaviors**: Universal moralizing, fact invention, recommending extremes without evidence of repeated harm patterns.
+
+### 4.4 Synthesis Prompt (Final Convergence)
+
+**Purpose**: Integrate debate history into unified, balanced perspective.
+
+**Input**: Complete transcript of all A and B outputs across all rounds, plus original user context.
+
+**Output**: 
+- Summary of internal debate evolution
+- Strongest balanced conclusions
+- Clear next steps without being authoritarian
+- Compassionate framing without vagueness
+
+**Quality Criteria**: The synthesis must reflect genuine integration of competing perspectives, not simple concatenation or dominance of one agent over the other.
+
+## 5. Clarification Phase Workflow
+
+The clarification phase represents a mandatory gate that all user inputs must pass through before reasoning begins. This phase exists because ambiguous inputs produce low-quality multi-perspective analysis.
+
+**Phase Sequence**:
+
+1. **User Input Capture**: Frontend sends initial user message to backend.
+
+2. **Clarification Prompt Composition**: Backend pairs user input with Clarification System Prompt (Prompt 0).
+
+3. **Clarification Question Generation**: Backend forwards composed prompt to laptop via Tailscale. Laptop processes and returns customized clarification questions.
+
+4. **Question Display**: Backend streams questions to frontend for user response.
+
+5. **Clarification Answer Capture**: User provides answers through frontend interface.
+
+6. **Context Merging**: Backend merges original user input with clarification answers into unified "merged user prompt."
+
+7. **State Transition**: System transitions from `CLARIFICATION_PENDING` to `CLARIFICATION_COMPLETE`, unlocking the debate phase.
+
+**Critical Design Decision**: The merged user prompt becomes the canonical input for all subsequent reasoning rounds. It is never modified after this point. This ensures consistency across all agent interactions and prevents context drift.
+
+The clarification phase cannot be skipped. If the user attempts to proceed without answering clarification questions, the system remains in `CLARIFICATION_PENDING` state. This constraint prevents low-quality reasoning from proceeding.
+
+## 6. Multi-Round Prompt Switching and Debate Mechanism
+
+The debate mechanism constitutes the system's core innovation. It implements forced perspective alternation through structured prompt switching across multiple rounds.
+
+### 6.1 Round Structure
+
+Each round comprises two sequential steps:
+
+**Step 1 (Prompt A - Expansion)**:
+- Input: Merged user prompt + (if round > 1: previous Prompt B output)
+- Processing: Laptop generates expanded reasoning
+- Output: A_n (where n = round number)
+
+**Step 2 (Prompt B - Compression)**:
+- Input: Merged user prompt + A_n output
+- Processing: Laptop generates compressed counter-perspective
+- Output: B_n
+
+### 6.2 Inter-Round Information Flow
+
+**Round 1**:
+- Prompt A receives: Merged user prompt only
+- Prompt A produces: A₁
+- Prompt B receives: Merged user prompt + A₁
+- Prompt B produces: B₁
+
+**Round 2**:
+- Prompt A receives: Merged user prompt + B₁
+- Prompt A produces: A₂
+- Prompt B receives: Merged user prompt + A₂
+- Prompt B produces: B₂
+
+**Rounds 3–5**: Pattern continues identically.
+
+### 6.3 Debate Dynamics
+
+Each round introduces three transformations:
+
+1. **Challenge**: Agent B critiques weaknesses in Agent A's reasoning
+2. **Integration**: Agent A incorporates valid critiques in next round
+3. **Refinement**: Both agents strengthen arguments by addressing opposition
+
+This creates an iterative refinement process where:
+- Unsupported assumptions get flagged and removed
+- Emotional truth remains validated without collapsing into affirmation
+- Logical rigor increases without invalidating subjective experience
+- Perspective coverage expands across multiple valid interpretations
+
+### 6.4 Termination Criteria
+
+The debate terminates after a fixed number of rounds (configurable, default: 4–5 rounds). This parameter balances reasoning quality against computational cost and context window limitations.
+
+The system does not implement dynamic termination based on convergence detection. All debates run to completion. This ensures consistent output quality and prevents premature stopping when agents appear to agree superficially.
+
+## 7. Backend State Management and Control Flow
+
+The backend implements a deterministic finite state machine with the following states and transitions:
+
+### 7.1 State Enumeration
+
+```
+INIT → User session created
+CLARIFICATION_PENDING → Waiting for clarification answers
+CLARIFICATION_COMPLETE → Ready to begin debate
+ROUND_N_A → Processing Prompt A for round N
+ROUND_N_B → Processing Prompt B for round N
+SYNTHESIS → Generating final output
+COMPLETE → Session terminated
+```
+
+### 7.2 State Transition Rules
+
+- `INIT` → `CLARIFICATION_PENDING`: Automatic on first user input
+- `CLARIFICATION_PENDING` → `CLARIFICATION_COMPLETE`: Triggered by clarification answer submission
+- `CLARIFICATION_COMPLETE` → `ROUND_1_A`: Automatic after context merge
+- `ROUND_N_A` → `ROUND_N_B`: Triggered by Prompt A output receipt
+- `ROUND_N_B` → `ROUND_(N+1)_A`: Triggered by Prompt B output receipt (if N < max_rounds)
+- `ROUND_N_B` → `SYNTHESIS`: Triggered by Prompt B output receipt (if N == max_rounds)
+- `SYNTHESIS` → `COMPLETE`: Triggered by synthesis output receipt
+
+### 7.3 Session State Data Structure
+
+Each session maintains:
+```
+session_id: UUID
+original_user_prompt: str
+clarification_questions: str
+clarification_answers: str
+merged_user_prompt: str
+round_outputs: List[Dict]  # [{round: int, agent: str, output: str}]
+current_round: int
+current_system_prompt: str  # "A" or "B"
+max_rounds: int  # default: 4
+state: str  # current state machine position
+```
+
+### 7.4 Prompt Composition Logic
+
+The backend constructs prompts by combining:
+- System prompt template (A, B, or Synthesis)
+- User context (merged_user_prompt)
+- Previous agent output (if applicable)
+
+Template format for Mistral 7B v0.3:
+```
+<inst>
+{system_prompt_text}
+{user_context}
+{previous_output}
+</inst>
+```
+
+The backend never sends raw user input directly. All prompts undergo template formatting before transmission to the laptop.
+
+## 8. Frontend–Backend–Model Communication Path
+
+### 8.1 Frontend → Backend
+
+**Protocol**: HTTPS POST requests
+
+**Endpoints**:
+- `/chat/init`: Create new session
+- `/chat/clarify`: Submit clarification answers
+- `/chat/stream`: Subscribe to real-time agent outputs (WebSocket)
+
+**Payload Structure**:
+```json
+{
+  "session_id": "uuid",
+  "message": "user input text",
+  "type": "initial | clarification"
+}
+```
+
+### 8.2 Backend → Laptop (via Tailscale)
+
+**Protocol**: HTTP POST to Ollama API endpoint
+
+**Endpoint**: `http://{laptop_tailscale_ip}:11434/api/generate`
+
+**Payload Structure**:
+```json
+{
+  "model": "mistral:7b-instruct-v0.3-q4_K_M",
+  "prompt": "<inst>...</inst>",
+  "stream": false,
+  "options": {
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "max_tokens": 2048
+  }
+}
+```
+
+**Security**: Communication occurs over Tailscale encrypted tunnel. No public IP exposure of laptop.
+
+### 8.3 Laptop → Backend
+
+**Response Format**:
+```json
+{
+  "response": "generated text",
+  "done": true,
+  "total_duration": 1234567890
+}
+```
+
+The backend extracts the `response` field and stores it in session state before proceeding to the next state transition.
+
+### 8.4 Backend → Frontend (Streaming)
+
+**Protocol**: WebSocket or Server-Sent Events
+
+**Message Types**:
+- `clarification_questions`: Display questions to user
+- `agent_output`: Stream intermediate reasoning (Round N, Agent X)
+- `synthesis`: Final output ready
+- `error`: Processing failure
+
+**Payload Structure**:
+```json
+{
+  "type": "agent_output",
+  "round": 2,
+  "agent": "B",
+  "content": "reasoning text",
+  "timestamp": "ISO-8601"
+}
+```
+
+This enables real-time visibility into the debate process if the user enables observability mode.
+
+## 9. Model Constraints and Operational Assumptions
+
+### 9.1 Model Specification
+
+**Model**: Mistral 7B Instruct v0.3  
+**Quantization**: Q4_K_M (4-bit quantization, optimized for quality)  
+**Parameters**: 7 billion  
+**VRAM Requirement**: ~4.5–5GB  
+**Hardware**: NVIDIA RTX 4060 (8GB VRAM)  
+**Inference Engine**: Ollama on Windows
+
+### 9.2 Context Window Management
+
+Mistral 7B supports context windows up to 8192 tokens (exact limit for v0.3 unspecified in source). The backend must manage cumulative context growth across rounds.
+
+**Context Composition Per Round**:
+- System prompt: ~500–1500 tokens
+- Merged user prompt: ~200–1000 tokens
+- Previous agent output: ~500–2000 tokens
+
+**Maximum Round Estimate**: With conservative estimates, 4–5 rounds remain feasible before approaching context limits. Beyond 5 rounds, truncation or summarization becomes necessary.
+
+### 9.3 Inference Performance Assumptions
+
+**Expected Latency Per Request**:
+- Clarification: ~5–10 seconds
+- Prompt A: ~8–15 seconds
+- Prompt B: ~8–15 seconds
+- Synthesis: ~10–20 seconds
+
+**Total Pipeline Duration**: 45–90 seconds for 4-round debate including synthesis.
+
+These estimates assume local GPU inference on RTX 4060 with no concurrent workloads.
+
+### 9.4 Prompt Template Constraints
+
+Mistral 7B v0.3 uses the `<inst>` template format. All prompts must conform to:
+```
+<inst>
+[system instruction]
+[user content]
+</inst>
+```
+
+Deviations from this format may produce degraded output quality.
+
+## 10. Real-Time Output Streaming and Observability
+
+The system implements optional real-time streaming of intermediate agent outputs to the frontend. This feature transforms the black-box reasoning process into an observable, transparent workflow.
+
+### 10.1 Streaming Mechanism
+
+After each model inference completes, the backend:
+1. Stores output in session state
+2. Formats output as structured message
+3. Pushes message to frontend via WebSocket
+4. Proceeds to next state transition
+
+This occurs for:
+- Clarification questions (always)
+- Each Prompt A output (if streaming enabled)
+- Each Prompt B output (if streaming enabled)
+- Final synthesis (always)
+
+### 10.2 User Experience Impact
+
+When streaming is enabled, users observe:
+- Agent A expanding possibilities
+- Agent B compressing and challenging
+- Perspective evolution across rounds
+- Convergence toward synthesis
+
+This visibility serves multiple purposes:
+- **Transparency**: Users see how conclusions form
+- **Trust**: Reasoning process becomes auditable
+- **Engagement**: Live debate holds attention
+- **Education**: Users learn multi-perspective thinking
+
+### 10.3 Implementation Considerations
+
+Streaming adds negligible computational overhead but requires WebSocket infrastructure. The backend must handle:
+- Connection state management
+- Message ordering guarantees
+- Disconnection recovery
+- Bandwidth considerations for long outputs
+
+The feature must be toggleable per session or per user preference.
+
+## 11. Final Synthesis and Output Generation
+
+The synthesis phase represents the convergence point where all debate history collapses into unified perspective.
+
+### 11.1 Synthesis Prompt Construction
+
+**Input Components**:
+- Original user prompt
+- Clarification answers
+- Complete transcript: [A₁, B₁, A₂, B₂, ..., A_n, B_n]
+
+**Synthesis Prompt Directive**:
+- Summarize debate evolution
+- Identify strongest converged conclusions
+- Preserve both emotional truth and logical constraints
+- Generate actionable next steps
+- Avoid dominance of either agent's final position
+
+### 11.2 Output Quality Criteria
+
+Effective synthesis exhibits:
+- **Balance**: Neither expansion nor compression dominates
+- **Integration**: Valid critiques from both agents appear
+- **Clarity**: User receives concrete understanding
+- **Nuance**: Complexity remains acknowledged without paralysis
+- **Compassion**: Emotional reality stays validated
+- **Agency**: User retains decision-making power
+
+Poor synthesis manifests as:
+- Simple concatenation of agent outputs
+- Last-agent dominance (recency bias)
+- Loss of emotional truth in favor of "logic"
+- Vague platitudes without actionable direction
+
+### 11.3 Delivery
+
+The synthesis output flows:
+```
+Laptop → Backend → Frontend → User
+```
+
+The user never sees intermediate agent outputs unless streaming is enabled. The synthesis alone represents the system's official response.
+
+## 12. Design Guarantees and System Capabilities
+
+This architecture provides the following guarantees and capabilities:
+
+### 12.1 Guarantees
+
+**Perspective Plurality**: Every user input undergoes interpretation by at least two competing analytical frameworks before conclusion.
+
+**Forced Clarification**: No reasoning begins without explicit context enrichment.
+
+**Stateless Model**: The inference endpoint maintains zero conversation memory, preventing hidden state contamination.
+
+**Deterministic Control**: The backend's state machine ensures identical inputs produce identical reasoning flows.
+
+**Separation of Concerns**: Frontend handles display only; backend handles logic only; laptop handles computation only.
+
+**Auditability**: All intermediate reasoning can be logged and reviewed.
+
+### 12.2 Capabilities
+
+**Multi-Perspective Analysis**: Generates genuinely distinct interpretations rather than superficial variations.
+
+**Bias Detection**: Scanner functions in both agents flag shadow patterns (dominance, victimhood, manipulation).
+
+**Emotional Intelligence**: System preserves emotional reality without collapsing into pure affirmation.
+
+**Logical Rigor**: System enforces evidence-based reasoning without invalidating subjective experience.
+
+**Scalability**: Architecture supports model upgrades, additional agents, or increased round counts without redesign.
+
+**Observability**: Optional real-time streaming enables transparency into reasoning process.
+
+**Domain Flexibility**: System applies equally to relationship advice, identity exploration, decision-making, or ethical reasoning.
+
+### 12.3 Limitations
+
+**Computational Cost**: Multi-round debate requires 8–12 inference calls per user interaction.
+
+**Latency**: Total pipeline duration ranges 45–90 seconds.
+
+**Context Window**: Extended debates risk exceeding model context limits.
+
+**Model Dependency**: Output quality depends entirely on base model capabilities.
+
+**No Learning**: System maintains zero memory across sessions.
+
+---
+
+**Document Version**: 1.0  
+**Target Deployment**: Python Backend + Mistral 7B Local Inference  
+**Word Count**: 2,847 words
