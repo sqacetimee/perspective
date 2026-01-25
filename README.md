@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Perspective AI (V2.2 Neon)
 
-## Getting Started
+> A multi-agent reasoning system that helps users navigate complex decisions through expanding and compressing perspectives.
 
-First, run the development server:
+## 🧠 Core Architecture
+This system uses a **Debate-Synthesis** architecture managed by a Python/FastAPI backend and a Next.js frontend.
+
+### The Agents
+1.  **Meta Agent:** Analyzes the prompt to select the best underlying model (DeepSeek vs Llama).
+2.  **Clarification Agent:** Smartly asks for missing context (or skips if sufficient).
+3.  **Agent A (Expansion):** "The Explorer". Uses **3 Distinct Lenses** (Engineer, Empath, Pragmatist) to widen the problem space.
+4.  **Agent B (Compression):** "The Editor". Uses **Constructive Critique** logic to pick apart arguments and narrow focus.
+5.  **Synthesis Agent:** Delivers the final answer in a clear **Second-Person** ("You") perspective.
+
+## 🚀 Features (V7 Upgrade)
+-   **Punchy Prompts:** Highly tuned system prompts for "Healthy" vs "Wounded" reasoning patterns.
+-   **Scanner Mode:** Agents actively detect and flag dysregulated behavioral patterns.
+-   **Full Context Debate:** Agents have full visibility into the entire conversation history (no amnesia).
+-   **Crisis Safety:** Integrated protocols for Canadian crisis response (911/Helplines).
+
+## 🛠️ Setup & Running
+
+### Prerequisites
+-   Python 3.11+
+-   Node.js 18+
+-   Ollama (running locally with `deepseek-r1:1.5b` and `llama3.2`)
+
+### Quick Start
+The easiest way to run the full stack is the helper script:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+/tmp/restart_backend.sh
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Or manually:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+**Backend:**
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python main.py
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+**Frontend:**
+```bash
+npm run dev
+```
 
-## Learn More
+## 🔒 Privacy
+This system is designed with a **privacy-first** approach. All reasoning happens locally via Ollama. No user data is sent to external cloud LLMs.
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+*Built by Roan Curtis*
