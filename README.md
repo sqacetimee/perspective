@@ -6,7 +6,7 @@
 This system uses a **Debate-Synthesis** architecture managed by a Python/FastAPI backend and a Next.js frontend.
 
 ### The Agents
-1.  **Meta Agent:** Analyzes the prompt to select the best underlying model (DeepSeek vs Llama).
+1.  **Meta Agent:** Analyzes the prompt to select the best underlying model of all 5 apis (deepseek, qwen-coder, gemma, gpt-oss, qwen-emb).
 2.  **Clarification Agent:** Smartly asks for missing context (or skips if sufficient).
 3.  **Agent A (Expansion):** "The Explorer". Uses **3 Distinct Lenses** (Engineer, Empath, Pragmatist) to widen the problem space.
 4.  **Agent B (Compression):** "The Editor". Uses **Constructive Critique** logic to pick apart arguments and narrow focus.
@@ -51,5 +51,4 @@ npm run dev
 ## 🔒 Privacy
 This system is designed with a **privacy-first** approach. All reasoning happens locally via Ollama. No user data is sent to external cloud LLMs.
 
----
-*Built by Roan Curtis*
+--*Built by David Ogunmuyiwa, Rajin Uddin, Josh Jennings, and Roan Curtis 
