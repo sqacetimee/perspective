@@ -16,26 +16,72 @@ class StateMachineOrchestrator:
     async def process_init(self, session: SessionData) -> SessionData:
         """
         State: INIT
-        Action: Generate clarification questions
+        Action: 
+        1. Run META AGENT to select model
+        2. Run CLARIFICATION AGENT (using selected model)
         Next State: CLARIFICATION_PENDING
         """
         logger.info(f"[{session.session_id}] Processing INIT")
         
         try:
-            # Generate clarification prompt
+            # 1. Meta Agent (Model Selection)
+            logger.info(f"[{session.session_id}] Running Meta Agent...")
+            meta_prompt = self.prompts.format_meta(session.original_user_prompt)
+            
+            # Use deepseek to decide the model
+            meta_result = await ollama_client.generate(meta_prompt, model_key="deepseek")
+            
+            try:
+                import json
+                import re
+                
+                raw_response = meta_result["response"]
+                # Clean markdown code blocks if present
+                if "```" in raw_response:
+                    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_response, re.DOTALL)
+                    if match:
+                        raw_response = match.group(1)
+                
+                meta_json = json.loads(raw_response)
+                selected_model = meta_json.get("model", "deepseek")
+                session.selected_model = selected_model
+                session.model_reasoning = meta_json.get("reason", "Default fallback")
+                logger.info(f"[{session.session_id}] Meta Agent selected: {session.selected_model} ({session.model_reasoning})")
+            except Exception as e:
+                logger.warning(f"[{session.session_id}] Meta Agent parse failed, defaulting to deepseek: {e}. Raw: {meta_result['response'][:100]}")
+                session.selected_model = "deepseek"
+            
+            # Save selection
+            await session_store.save(session)
+
+            # 2. Clarification Agent (Uses selected_model)
+            logger.info(f"[{session.session_id}] Running Clarification Agent (Model: {session.selected_model})...")
             prompt = self.prompts.format_clarification(session.original_user_prompt)
             
-            # Call Ollama
-            result = await ollama_client.generate(prompt)
+            # Call Ollama with SELECTED MODEL
+            result = await ollama_client.generate(prompt, model_key=session.selected_model)
             
             # Store clarification questions
+            # Store clarification questions
             session.clarification_questions = result["response"]
-            session.state = SessionState.CLARIFICATION_PENDING
+            
+            # Smart Auto-Skip Logic
+            if "NO CLARIFICATION NEEDED" in session.clarification_questions:
+                logger.info(f"[{session.session_id}] Auto-skipping clarification (Sufficient context)")
+                session.clarification_answers = "None (Clarification skipped - context sufficient)"
+                session.state = SessionState.CLARIFICATION_COMPLETE
+                
+                # We need to manually trigger the next step transition logic 
+                # effectively similar to what process_clarification does, but we can't call async methods easily here 
+                # to chain them inside the return. 
+                # Actually, simply returning CLARIFICATION_COMPLETE allows the main loop to pick it up immediately.
+            else:
+                session.state = SessionState.CLARIFICATION_PENDING
             
             # Save progress
             await session_store.save(session)
             
-            logger.info(f"[{session.session_id}] Clarification questions generated")
+            logger.info(f"[{session.session_id}] Init processing done. State: {session.state}")
             return session
             
         except Exception as e:
@@ -90,7 +136,7 @@ class StateMachineOrchestrator:
                 session.history,
                 round_num
             )
-            result_a = await ollama_client.generate(prompt_a)
+            result_a = await ollama_client.generate(prompt_a, model_key=session.selected_model)
             
             # Store Agent A output
             output_a = RoundOutput(
@@ -114,7 +160,7 @@ class StateMachineOrchestrator:
                 session.history,
                 round_num
             )
-            result_b = await ollama_client.generate(prompt_b)
+            result_b = await ollama_client.generate(prompt_b, model_key=session.selected_model)
             
             # Store Agent B output
             output_b = RoundOutput(
@@ -167,7 +213,7 @@ class StateMachineOrchestrator:
             )
             
             # Call Ollama
-            result = await ollama_client.generate(prompt)
+            result = await ollama_client.generate(prompt, model_key=session.selected_model)
             
             # Store synthesis as final output
             synthesis = RoundOutput(

@@ -168,9 +168,14 @@ export default function Home() {
               {isPending ? "Opening…" : "Try it now →"}
             </motion.button>
 
-            <button className="rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-zinc-950 hover:bg-zinc-200 transition">
+            <a
+              href="https://youtube.com/@roancurtis4755?si=TWNo4BJ47Gitw5-y"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-zinc-950 hover:bg-zinc-200 transition"
+            >
               Watch demo
-            </button>
+            </a>
           </motion.div>
         </div>
 

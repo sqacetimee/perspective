@@ -29,17 +29,22 @@ function ChatBubble({
   title,
   content,
 }: {
-  role: "system" | "agent" | "synthesis";
+  role: "system" | "agent" | "synthesis" | "agent_expansion" | "agent_compression";
   title: string;
   content: string;
 }) {
   const base = "rounded-2xl border p-3 backdrop-blur-xl";
-  const styles =
-    role === "synthesis"
-      ? "border-emerald-400/20 bg-emerald-500/10"
-      : role === "system"
-      ? "border-white/10 bg-white/[0.06]"
-      : "border-white/10 bg-black/20";
+  let styles = "border-white/10 bg-black/20"; // default
+
+  if (role === "synthesis") {
+    styles = "border-emerald-400/30 bg-emerald-500/20"; // Green tint (enhanced)
+  } else if (role === "system") {
+    styles = "border-white/10 bg-white/[0.06]";
+  } else if (role === "agent_expansion") {
+    styles = "border-pink-300/20 bg-pink-400/10"; // Light pink
+  } else if (role === "agent_compression") {
+    styles = "border-rose-500/20 bg-rose-900/30"; // Purplish red
+  }
 
   return (
     <div className={cn(base, styles)}>
@@ -62,7 +67,7 @@ export default function ChatPage() {
 
   const feed = useMemo(() => {
     const out: Array<{
-      role: "system" | "agent" | "synthesis";
+      role: "system" | "agent" | "synthesis" | "agent_expansion" | "agent_compression";
       title: string;
       content: string;
     }> = [];
@@ -91,19 +96,25 @@ export default function ChatPage() {
       } else if (m.agent === "SYNTHESIS" || m.type === "synthesis") {
         out.push({ role: "synthesis", title: "Synthesis", content: m.content });
       } else if (m.type === "agent_output") {
-        const name =
-          m.agent === "EXPANSION"
-            ? "Agent A"
-            : m.agent === "COMPRESSION"
-            ? "Agent B"
-            : m.agent || "Agent";
-        out.push({ role: "agent", title: name, content: m.content });
+        // ONLY show agent output if showAIConversation is TRUE
+        if (showAIConversation) {
+          const isExpansion = m.agent === "EXPANSION";
+          const isCompression = m.agent === "COMPRESSION";
+
+          let role: "agent" | "agent_expansion" | "agent_compression" = "agent";
+          if (isExpansion) role = "agent_expansion";
+          if (isCompression) role = "agent_compression";
+
+          const name = isExpansion ? "Agent A (Expansion)" : isCompression ? "Agent B (Compression)" : (m.agent || "Agent");
+
+          out.push({ role, title: name, content: m.content });
+        }
       }
     }
 
     if (chat.error) out.push({ role: "system", title: "Error", content: chat.error });
     return out;
-  }, [chat.messages, chat.sessionId, chat.state, chat.error]);
+  }, [chat.messages, chat.sessionId, chat.state, chat.error, showAIConversation]);
 
   const clarificationPending = chat.state === "CLARIFICATION_PENDING";
 
@@ -120,9 +131,19 @@ export default function ChatPage() {
     await chat.initSession(t);
   };
 
+  const [isClarificationSubmitted, setIsClarificationSubmitted] = useState(false);
+
+  // Reset local submission state when global state changes effectively
+  useEffect(() => {
+    if (chat.state !== "CLARIFICATION_PENDING") {
+      setIsClarificationSubmitted(false);
+    }
+  }, [chat.state]);
+
   const submitClarification = async () => {
     const t = clarify.trim();
     if (!t) return;
+    setIsClarificationSubmitted(true); // Optimistic hide
     await chat.submitClarification(t);
     setClarify("");
   };
@@ -202,7 +223,11 @@ export default function ChatPage() {
         </AnimatePresence>
 
         {/* Main chat box */}
-        <div className="mt-5 mx-auto max-w-4xl rounded-3xl border border-white/10 bg-white/5 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+        <div className="relative mt-5 mx-auto max-w-4xl overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+          {/* Soul Glow */}
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-fuchsia-900/20 via-black/0 to-black/0" />
+          <div className="pointer-events-none absolute -top-40 -right-40 h-[400px] w-[400px] rounded-full bg-fuchsia-600/10 blur-[100px]" />
+          <div className="pointer-events-none absolute -bottom-40 -left-40 h-[400px] w-[400px] rounded-full bg-indigo-600/10 blur-[100px]" />
           <div className="border-b border-white/10 px-4 py-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-xs text-zinc-400">
@@ -239,9 +264,9 @@ export default function ChatPage() {
               <ChatBubble key={idx} role={m.role} title={m.title} content={m.content} />
             ))}
 
-            {clarificationPending && (
-              <div className="rounded-2xl border border-yellow-400/20 bg-yellow-500/10 p-3">
-                <div className="text-xs font-semibold text-yellow-200">
+            {clarificationPending && !isClarificationSubmitted && (
+              <div className="rounded-2xl border border-cyan-400/30 bg-cyan-500/10 p-3 shadow-[0_0_20px_rgba(34,211,238,0.1)]">
+                <div className="text-xs font-semibold text-cyan-200">
                   Answer clarification
                 </div>
                 <textarea

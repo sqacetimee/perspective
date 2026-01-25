@@ -15,8 +15,8 @@ class SessionState(str, Enum):
 
 class AgentType(str, Enum):
     CLARIFICATION = "CLARIFICATION"
-    EXPANSION = "EXPANSION"
-    COMPRESSION = "COMPRESSION"
+    EXPANSION = "A"
+    COMPRESSION = "B"
     SYNTHESIS = "SYNTHESIS"
 
 class RoundOutput(BaseModel):
@@ -45,10 +45,6 @@ class SessionData(BaseModel):
     # Error handling
     error_message: Optional[str] = None
     retry_count: int = 0
-    
-    # Meta Agent Data
-    selected_model: str = "deepseek"
-    model_reasoning: Optional[str] = None
 
 class InitRequest(BaseModel):
     message: str
