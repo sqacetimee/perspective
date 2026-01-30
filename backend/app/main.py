@@ -7,11 +7,11 @@ import asyncio
 from datetime import datetime
 
 from app.models import (
-    SessionData, SessionState, InitRequest, ClarifyRequest, WSMessage
+    SessionData, SessionState, InitRequest, ClarifyRequest, WSMessage, AgentType
 )
 from app.session_store import session_store
 from app.state_machine import orchestrator
-from app.ollama_client import ollama_client
+from app.ollama_client import zai_client
 from app.config import get_settings
 
 # Configure logging
@@ -34,19 +34,24 @@ app.add_middleware(
 )
 
 # Active WebSocket connections
-active_connections: Dict[UUID, WebSocket] = {}
+active_connections: Dict[str, WebSocket] = {}
 
 # =============== REST ENDPOINTS ===============
 
 @app.get("/api/health")
 async def health_check():
     """System health check"""
-    ollama_healthy = await ollama_client.health_check()
+    try:
+        zai_healthy = await zai_client.health_check()
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        zai_healthy = False
+    
     return {
-        "status": "healthy" if ollama_healthy else "degraded",
+        "status": "healthy" if zai_healthy else "degraded",
         "backend": "operational",
-        "ollama_connected": ollama_healthy,
-        "ollama_url": settings.ollama_base_url,
+        "zai_connected": zai_healthy,
+        "zai_url": settings.zai_base_url,
         "max_rounds": settings.max_rounds
     }
 
@@ -59,20 +64,20 @@ async def active_diagnostic():
         "checks": []
     }
     
-    # 1. Ollama Probe
+    # 1. Z.AI Probe
     try:
         probe_start = datetime.now()
-        await ollama_client.generate("test")
+        await zai_client.generate("test")
         probe_duration = (datetime.now() - probe_start).total_seconds()
         report["checks"].append({
-            "name": "ollama_inference", 
+            "name": "zai_inference", 
             "status": "pass", 
             "latency_ms": int(probe_duration * 1000)
         })
     except Exception as e:
         report["status"] = "degraded"
         report["checks"].append({
-            "name": "ollama_inference", 
+            "name": "zai_inference", 
             "status": "fail", 
             "error": str(e)
         })
@@ -88,6 +93,16 @@ async def active_diagnostic():
         })
     except Exception as e:
         report["checks"].append({"name": "disk_space", "status": "fail", "error": str(e)})
+
+    # 3. Cost Tracking Status
+    try:
+        report["checks"].append({
+            "name": "cost_tracking",
+            "status": "enabled" if settings.enable_cost_tracking else "disabled",
+            "log_level": settings.cost_tracking_log_level
+        })
+    except Exception as e:
+        report["checks"].append({"name": "cost_tracking", "status": "fail", "error": str(e)})
 
     return report
 
@@ -149,6 +164,24 @@ async def get_session(session_id: UUID):
     
     return session
 
+@app.get("/api/chat/{session_id}/costs")
+async def get_session_costs(session_id: UUID):
+    """Get cost tracking information for a session"""
+    session = await session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    return {
+        "session_id": str(session.session_id),
+        "total_cost": session.cost_tracking.total_cost,
+        "total_input_tokens": session.cost_tracking.total_input_tokens,
+        "total_output_tokens": session.cost_tracking.total_output_tokens,
+        "model_costs": session.cost_tracking.model_costs,
+        "state": session.state,
+        "max_rounds": session.max_rounds,
+        "current_round": session.current_round
+    }
+
 # =============== WEBSOCKET ===============
 
 @app.websocket("/api/ws/{session_id}")
@@ -164,11 +197,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     
     try:
         # Send initial state
-        session = await session_store.load(session_id)
+        # Convert string to UUID for session_store operations
+        session_id_uuid = UUID(session_id)
+        session = await session_store.load(session_id_uuid)
         if session:
             await websocket.send_json(WSMessage(
                 type="state_change",
-                session_id=session_id,
+                session_id=session_id_uuid,
                 state=session.state
             ).model_dump(mode='json'))
             
@@ -176,8 +211,17 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             if session.clarification_questions:
                 await websocket.send_json(WSMessage(
                     type="agent_output",
-                    session_id=session_id,
-                    agent="CLARIFICATION",
+                    session_id=session_id_uuid,
+                    agent=AgentType.CLARIFICATION,
+                    content=session.clarification_questions
+                ).model_dump(mode='json'))
+            
+            # If clarification ready, send it
+            if session.clarification_questions:
+                await websocket.send_json(WSMessage(
+                    type="agent_output",
+                    session_id=session_id_uuid,
+                    agent=AgentType.CLARIFICATION,
                     content=session.clarification_questions
                 ).model_dump(mode='json'))
         
@@ -234,7 +278,7 @@ async def process_session_background(session_id: UUID):
                 await broadcast_to_session(session_id, WSMessage(
                     type="agent_output",
                     session_id=session_id,
-                    agent="CLARIFICATION",
+                    agent=AgentType.CLARIFICATION,
                     content=session.clarification_questions
                 ))
                 

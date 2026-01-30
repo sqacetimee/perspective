@@ -1,80 +1,85 @@
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from app.models import SessionData, SessionState, AgentType, RoundOutput
 from app.prompts import PromptManager
-from app.ollama_client import ollama_client
+from app.ollama_client import zai_client
 from app.session_store import session_store
+from app.model_config import TaskType
 
 logger = logging.getLogger(__name__)
 
 class StateMachineOrchestrator:
-    """Core state machine managing debate workflow"""
+    """Core state machine managing debate workflow with Z.AI model routing"""
     
     def __init__(self):
         self.prompts = PromptManager()
     
+    def _track_cost(self, session: SessionData, result: Dict[str, Any]) -> None:
+        """
+        Track API costs for a session.
+        
+        Args:
+            session: Current session data
+            result: API response with cost information
+        """
+        cost = result.get("cost", 0.0)
+        input_tokens = result.get("input_tokens", 0)
+        output_tokens = result.get("output_tokens", 0)
+        model = result.get("model_used", "unknown")
+        
+        # Update session cost tracking
+        session.cost_tracking.total_cost += cost
+        session.cost_tracking.total_input_tokens += input_tokens
+        session.cost_tracking.total_output_tokens += output_tokens
+        
+        # Track per-model costs
+        if model not in session.cost_tracking.model_costs:
+            session.cost_tracking.model_costs[model] = {
+                "cost": 0.0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "calls": 0
+            }
+        
+        session.cost_tracking.model_costs[model]["cost"] += cost
+        session.cost_tracking.model_costs[model]["input_tokens"] += input_tokens
+        session.cost_tracking.model_costs[model]["output_tokens"] += output_tokens
+        session.cost_tracking.model_costs[model]["calls"] += 1
+        
+        logger.info(
+            f"[{session.session_id}] Cost tracking - Model: {model}, "
+            f"Call cost: ${cost:.6f}, Total session cost: ${session.cost_tracking.total_cost:.6f}"
+        )
+    
     async def process_init(self, session: SessionData) -> SessionData:
         """
         State: INIT
-        Action: 
-        1. Run META AGENT to select model
-        2. Run CLARIFICATION AGENT (using selected model)
-        Next State: CLARIFICATION_PENDING
+        Action: Run CLARIFICATION AGENT using FREE model
+        Next State: CLARIFICATION_PENDING or CLARIFICATION_COMPLETE
         """
         logger.info(f"[{session.session_id}] Processing INIT")
         
         try:
-            # 1. Meta Agent (Model Selection)
-            logger.info(f"[{session.session_id}] Running Meta Agent...")
-            meta_prompt = self.prompts.format_meta(session.original_user_prompt)
-            
-            # Use deepseek to decide the model
-            meta_result = await ollama_client.generate(meta_prompt, model_key="deepseek")
-            
-            try:
-                import json
-                import re
-                
-                raw_response = meta_result["response"]
-                # Clean markdown code blocks if present
-                if "```" in raw_response:
-                    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_response, re.DOTALL)
-                    if match:
-                        raw_response = match.group(1)
-                
-                meta_json = json.loads(raw_response)
-                selected_model = meta_json.get("model", "deepseek")
-                session.selected_model = selected_model
-                session.model_reasoning = meta_json.get("reason", "Default fallback")
-                logger.info(f"[{session.session_id}] Meta Agent selected: {session.selected_model} ({session.model_reasoning})")
-            except Exception as e:
-                logger.warning(f"[{session.session_id}] Meta Agent parse failed, defaulting to deepseek: {e}. Raw: {meta_result['response'][:100]}")
-                session.selected_model = "deepseek"
-            
-            # Save selection
-            await session_store.save(session)
-
-            # 2. Clarification Agent (Uses selected_model)
-            logger.info(f"[{session.session_id}] Running Clarification Agent (Model: {session.selected_model})...")
+            # Clarification Agent (Uses FREE GLM-4.7-Flash model)
+            logger.info(f"[{session.session_id}] Running Clarification Agent (FREE model)...")
             prompt = self.prompts.format_clarification(session.original_user_prompt)
             
-            # Call Ollama with SELECTED MODEL
-            result = await ollama_client.generate(prompt, model_key=session.selected_model)
+            # Use FREE model for clarification
+            result = await zai_client.generate(prompt, task_type=TaskType.CLARIFICATION)
             
-            # Store clarification questions
+            # Track cost
+            self._track_cost(session, result)
+            
             # Store clarification questions
             session.clarification_questions = result["response"]
+            session.selected_model = result["model_used"]
+            session.model_reasoning = "Auto-selected for clarification task"
             
             # Smart Auto-Skip Logic
-            if "NO CLARIFICATION NEEDED" in session.clarification_questions:
+            if session.clarification_questions and "NO CLARIFICATION NEEDED" in session.clarification_questions:
                 logger.info(f"[{session.session_id}] Auto-skipping clarification (Sufficient context)")
                 session.clarification_answers = "None (Clarification skipped - context sufficient)"
                 session.state = SessionState.CLARIFICATION_COMPLETE
-                
-                # We need to manually trigger the next step transition logic 
-                # effectively similar to what process_clarification does, but we can't call async methods easily here 
-                # to chain them inside the return. 
-                # Actually, simply returning CLARIFICATION_COMPLETE allows the main loop to pick it up immediately.
             else:
                 session.state = SessionState.CLARIFICATION_PENDING
             
@@ -100,10 +105,14 @@ class StateMachineOrchestrator:
         logger.info(f"[{session.session_id}] Processing CLARIFICATION")
         
         # Merge context
-        session.merged_user_prompt = self.prompts.merge_context(
-            session.original_user_prompt,
-            session.clarification_answers
-        )
+        if session.clarification_answers:
+            session.merged_user_prompt = self.prompts.merge_context(
+                session.original_user_prompt,
+                session.clarification_answers
+            )
+        else:
+            session.merged_user_prompt = session.original_user_prompt
+        
         session.state = SessionState.CLARIFICATION_COMPLETE
         session.current_round = 1
         
@@ -115,7 +124,7 @@ class StateMachineOrchestrator:
     async def process_round(self, session: SessionData, on_output=None) -> SessionData:
         """
         State: ROUND_PROCESSING
-        Action: Run Expansion (A) then Compression (B) for current round
+        Action: Run Expansion (A) then Compression (B) for current round using CHEAP model
         Next State: ROUND_PROCESSING (next round) OR SYNTHESIS_PROCESSING
         
         Args:
@@ -128,22 +137,32 @@ class StateMachineOrchestrator:
         await session_store.save(session)
         
         try:
+            # Use merged prompt or fall back to original
+            merged_context = session.merged_user_prompt or session.original_user_prompt
+            
             # Step 1: Expansion Agent (A)
-            logger.info(f"[{session.session_id}] Round {round_num} - Agent A (Expansion)")
+            logger.info(f"[{session.session_id}] Round {round_num} - Agent A (Expansion) - CHEAP model")
             prompt_a = self.prompts.format_agent_round(
                 AgentType.EXPANSION,
-                session.merged_user_prompt,
+                merged_context,
                 session.history,
                 round_num
             )
-            result_a = await ollama_client.generate(prompt_a, model_key=session.selected_model)
+            result_a = await zai_client.generate(prompt_a, task_type=TaskType.DEBATE)
+            
+            # Track cost
+            self._track_cost(session, result_a)
             
             # Store Agent A output
             output_a = RoundOutput(
                 round_number=round_num,
                 agent=AgentType.EXPANSION,
                 content=result_a["response"],
-                tokens_used=result_a["tokens_generated"]
+                tokens_used=result_a["tokens_generated"],
+                input_tokens=result_a["input_tokens"],
+                output_tokens=result_a["output_tokens"],
+                model_used=result_a["model_used"],
+                cost=result_a["cost"]
             )
             session.history.append(output_a)
             await session_store.save(session)
@@ -153,21 +172,28 @@ class StateMachineOrchestrator:
                 await on_output(output_a)
             
             # Step 2: Compression Agent (B)
-            logger.info(f"[{session.session_id}] Round {round_num} - Agent B (Compression)")
+            logger.info(f"[{session.session_id}] Round {round_num} - Agent B (Compression) - CHEAP model")
             prompt_b = self.prompts.format_agent_round(
                 AgentType.COMPRESSION,
-                session.merged_user_prompt,
+                merged_context,
                 session.history,
                 round_num
             )
-            result_b = await ollama_client.generate(prompt_b, model_key=session.selected_model)
+            result_b = await zai_client.generate(prompt_b, task_type=TaskType.DEBATE)
+            
+            # Track cost
+            self._track_cost(session, result_b)
             
             # Store Agent B output
             output_b = RoundOutput(
                 round_number=round_num,
                 agent=AgentType.COMPRESSION,
                 content=result_b["response"],
-                tokens_used=result_b["tokens_generated"]
+                tokens_used=result_b["tokens_generated"],
+                input_tokens=result_b["input_tokens"],
+                output_tokens=result_b["output_tokens"],
+                model_used=result_b["model_used"],
+                cost=result_b["cost"]
             )
             session.history.append(output_b)
             await session_store.save(session)
@@ -177,8 +203,14 @@ class StateMachineOrchestrator:
                 await on_output(output_b)
             
             # Check if we should continue or synthesize
-            if round_num >= session.max_rounds:
-                logger.info(f"[{session.session_id}] Completed {session.max_rounds} rounds, moving to synthesis")
+            # Calculate total agent outputs so far
+            total_outputs = len(session.history)
+            
+            # Each round has 2 agents (A and B), so divide by 2
+            total_rounds = total_outputs // 2
+            
+            if total_rounds >= session.max_rounds:
+                logger.info(f"[{session.session_id}] Completed {session.max_rounds} rounds ({total_rounds} total outputs), moving to synthesis")
                 return await self.process_synthesis(session, on_output)
             else:
                 # Continue to next round
@@ -197,7 +229,7 @@ class StateMachineOrchestrator:
     async def process_synthesis(self, session: SessionData, on_output=None) -> SessionData:
         """
         State: SYNTHESIS_PROCESSING
-        Action: Generate final synthesis from debate history
+        Action: Generate final synthesis from debate history using PREMIUM model
         Next State: COMPLETE
         """
         logger.info(f"[{session.session_id}] Processing SYNTHESIS")
@@ -206,21 +238,31 @@ class StateMachineOrchestrator:
         await session_store.save(session)
         
         try:
+            # Use merged prompt or fall back to original
+            merged_context = session.merged_user_prompt or session.original_user_prompt
+            
             # Generate synthesis prompt
             prompt = self.prompts.format_synthesis(
-                session.merged_user_prompt,
+                merged_context,
                 session.history
             )
             
-            # Call Ollama
-            result = await ollama_client.generate(prompt, model_key=session.selected_model)
+            # Call Z.AI with PREMIUM model
+            result = await zai_client.generate(prompt, task_type=TaskType.SYNTHESIS)
+            
+            # Track cost
+            self._track_cost(session, result)
             
             # Store synthesis as final output
             synthesis = RoundOutput(
                 round_number=0,  # Special marker
                 agent=AgentType.SYNTHESIS,
                 content=result["response"],
-                tokens_used=result["tokens_generated"]
+                tokens_used=result["tokens_generated"],
+                input_tokens=result["input_tokens"],
+                output_tokens=result["output_tokens"],
+                model_used=result["model_used"],
+                cost=result["cost"]
             )
             session.history.append(synthesis)
             session.state = SessionState.COMPLETE
@@ -231,7 +273,13 @@ class StateMachineOrchestrator:
             if on_output:
                 await on_output(synthesis)
             
-            logger.info(f"[{session.session_id}] Synthesis complete")
+            # Log final cost summary
+            logger.info(
+                f"[{session.session_id}] Session complete - Total cost: ${session.cost_tracking.total_cost:.6f}, "
+                f"Input tokens: {session.cost_tracking.total_input_tokens}, "
+                f"Output tokens: {session.cost_tracking.total_output_tokens}"
+            )
+            
             return session
             
         except Exception as e:

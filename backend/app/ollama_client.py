@@ -3,82 +3,125 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional
 from app.config import get_settings
+from app.model_config import (
+    TaskType,
+    get_model_for_task,
+    calculate_cost,
+    get_model_info
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-class TellusAIClient:
-    """Async client for TELUS Hackathon OpenAI-compatible APIs"""
+class ZaiClient:
+    """Async client for Z.AI GLM Models API"""
     
     def __init__(self):
-        # Model endpoints and tokens from hackathon
-        self.models = {
-            "gemma": {
-                "base_url": "https://gemma-3-27b-3ca9s.paas.ai.telus.com/v1",
-                "api_key": "dc8704d41888afb2b889a8ebac81d12f",
-                "model_name": "google/gemma-3-27b-it"
-            },
-            "qwen-coder": {
-                "base_url": "https://qwen3coder30b-3ca9s.paas.ai.telus.com/v1",
-                "api_key": "b12e6fdc447aedf5cfce126b721e1854",
-                "model_name": "Qwen/Qwen3-Coder-30B-A3B-Instruct"
-            },
-            "deepseek": {
-                "base_url": "https://deepseekv32-3ca9s.paas.ai.telus.com/v1",
-                "api_key": "a12a7d3705b12aeb46eb4cc8d77f5446",
-                "model_name": "deepseek-ai/DeepSeek-V3.2-Exp"
-            },
-            "gpt-oss": {
-                "base_url": "https://rr-test-gpt-120-9219s.paas.ai.telus.com/v1",
-                "api_key": "1df668838dee5b8410e8e21a76fd9bb9",
-                "model_name": "gpt-oss:120b"
-            },
-            "qwen-emb": {
-                "base_url": "https://qwen-emb-3ca9s.paas.ai.telus.com/v1",
-                "api_key": "d14ac3d17de38782334555fcc0537969",
-                "model_name": "Qwen/Qwen3-Embedding-8B"
-            }
-        }
+        self.base_url = settings.zai_base_url
+        self.api_key = settings.zai_api_key
         
-        # Default model for different tasks
-        self.default_model = "deepseek"  # Best for reasoning
-        self.synthesis_model = "deepseek"  # Use same for synthesis
+        # Task-based model routing (instead of model keys)
+        self.task_routing = True
         
+        # Performance settings
         self.timeout = settings.ollama_timeout
         self.max_retries = settings.ollama_max_retries
         self.retry_delay = settings.ollama_retry_delay
+        
+        # Validate API key
+        if not self.api_key:
+            logger.error("Z.AI API key not configured. Set ZAI_API_KEY in .env")
+    
+    def _get_model_for_task(self, task_type: TaskType) -> str:
+        """
+        Get the optimal model for a given task type.
+        
+        Args:
+            task_type: TaskType enum value
+            
+        Returns:
+            Model identifier string
+        """
+        model_config = get_model_for_task(task_type)
+        return model_config["model"]
+    
+    def _calculate_request_cost(
+        self,
+        model: str,
+        input_tokens: int,
+        output_tokens: int
+    ) -> float:
+        """
+        Calculate the cost of an API call.
+        
+        Args:
+            model: Model identifier
+            input_tokens: Number of input tokens
+            output_tokens: Number of output tokens
+            
+        Returns:
+            Total cost in USD
+        """
+        return calculate_cost(model, input_tokens, output_tokens)
     
     async def health_check(self) -> bool:
-        """Check if API is reachable"""
+        """Check if Z.AI API is reachable"""
         try:
-            model_config = self.models[self.default_model]
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.get(
-                    f"{model_config['base_url']}/models",
-                    headers={"Authorization": f"Bearer {model_config['api_key']}"}
+                    f"{self.base_url}/models",
+                    headers={"Authorization": f"Bearer {self.api_key}"}
                 )
-                return response.status_code == 200
+                is_healthy = response.status_code == 200
+                logger.info(f"Z.AI health check: {'OK' if is_healthy else 'FAILED'}")
+                return is_healthy
         except Exception as e:
-            logger.error(f"API health check failed: {e}")
+            logger.error(f"Z.AI health check failed: {e}")
             return False
     
-    async def generate(self, prompt: str, model_key: str = None) -> Dict[str, Any]:
+    async def generate(
+        self,
+        prompt: str,
+        task_type: Optional[TaskType] = None,
+        model: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
-        Generate text using OpenAI-compatible completions API
+        Generate text using Z.AI OpenAI-compatible API.
         
+        Args:
+            prompt: The input prompt
+            task_type: TaskType enum for automatic model routing
+            model: Specific model to use (overrides task_type)
+            
         Returns:
             {
                 "response": str,
                 "total_duration": int (nanoseconds),
-                "tokens_generated": int
+                "tokens_generated": int,
+                "input_tokens": int,
+                "output_tokens": int,
+                "model_used": str,
+                "cost": float
             }
         """
-        model_key = model_key or self.default_model
-        model_config = self.models[model_key]
+        # Determine which model to use
+        if model:
+            model_name = model
+        elif task_type:
+            model_name = self._get_model_for_task(task_type)
+        else:
+            # Default to general task
+            model_name = self._get_model_for_task(TaskType.GENERAL)
         
+        # Build request payload
         payload = {
-            "model": model_config["model_name"],
-            "prompt": prompt,
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
             "max_tokens": settings.max_tokens,
             "temperature": settings.temperature,
             "top_p": settings.top_p,
@@ -86,16 +129,16 @@ class TellusAIClient:
         
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {model_config['api_key']}"
+            "Authorization": f"Bearer {self.api_key}"
         }
         
         last_error = None
         for attempt in range(self.max_retries):
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
-                    logger.info(f"TELUS API request attempt {attempt + 1}/{self.max_retries} to {model_key}")
+                    logger.info(f"Z.AI API request attempt {attempt + 1}/{self.max_retries} to {model_name}")
                     response = await client.post(
-                        f"{model_config['base_url']}/completions",
+                        f"{self.base_url}/chat/completions",
                         json=payload,
                         headers=headers
                     )
@@ -104,16 +147,30 @@ class TellusAIClient:
                     
                     # Extract response from OpenAI-compatible format
                     choices = data.get("choices", [])
-                    text = choices[0].get("text", "") if choices else ""
+                    text = choices[0].get("message", {}).get("content", "") if choices else ""
                     usage = data.get("usage", {})
+                    
+                    input_tokens = usage.get("prompt_tokens", 0)
+                    output_tokens = usage.get("completion_tokens", 0)
+                    total_tokens = input_tokens + output_tokens
+                    
+                    # Calculate cost
+                    cost = self._calculate_request_cost(model_name, input_tokens, output_tokens)
                     
                     result = {
                         "response": text,
                         "total_duration": 0,  # Not provided by API
-                        "tokens_generated": usage.get("completion_tokens", len(text.split()))
+                        "tokens_generated": output_tokens,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "model_used": model_name,
+                        "cost": cost
                     }
                     
-                    logger.info(f"TELUS API response received ({result['tokens_generated']} tokens)")
+                    logger.info(
+                        f"Z.AI API response received (Input: {input_tokens}, "
+                        f"Output: {output_tokens}, Model: {model_name}, Cost: ${cost:.6f})"
+                    )
                     return result
                     
             except httpx.TimeoutException as e:
@@ -138,7 +195,7 @@ class TellusAIClient:
                 logger.info(f"Retrying in {wait_time}s...")
                 await asyncio.sleep(wait_time)
         
-        raise RuntimeError(f"TELUS API generation failed after {self.max_retries} attempts: {last_error}")
+        raise RuntimeError(f"Z.AI API generation failed after {self.max_retries} attempts: {last_error}")
 
 # Singleton instance - replaces ollama_client
-ollama_client = TellusAIClient()
+zai_client = ZaiClient()

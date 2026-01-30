@@ -1,13 +1,16 @@
 from pydantic_settings import BaseSettings
-from functools import lru_cache
 
 class Settings(BaseSettings):
-    # Ollama
-    ollama_base_url: str
-    ollama_model: str
+    # Z.AI Configuration
+    zai_api_key: str = ""
+    zai_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    
+    # Legacy Ollama (kept for compatibility, not used in new architecture)
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "default"
     
     # System
-    max_rounds: int = 5
+    max_rounds: int = 3
     session_storage_path: str
     log_level: str = "INFO"
     
@@ -23,10 +26,14 @@ class Settings(BaseSettings):
     max_tokens: int = 2048
     context_window: int = 8192
     
+    # Cost Tracking
+    enable_cost_tracking: bool = True
+    cost_tracking_log_level: str = "INFO"
+    
     class Config:
         env_file = ".env"
         case_sensitive = False
 
-@lru_cache()
+# Removed @lru_cache() to prevent stale settings
 def get_settings() -> Settings:
     return Settings()

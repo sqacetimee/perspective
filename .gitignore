@@ -33,3 +33,7 @@ Thumbs.db
 .vscode/
 .idea/
 OFF_RECORD_DEMO_SCRIPT.md
+
+# specific backup envs
+backend/.env.backup.*
+.env.backup.*

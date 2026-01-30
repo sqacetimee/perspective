@@ -36,19 +36,22 @@ export interface ChatState {
 }
 
 function getHttpBase() {
-  // e.g. http://localhost:8000
+  // Use relative path (Nginx proxies /api to backend)
   return (
     process.env.NEXT_PUBLIC_BACKEND_HTTP?.replace(/\/$/, "") ||
-    `${window.location.protocol}//${window.location.hostname}:8000`
+    window.location.origin
   );
 }
 
 function getWsBase() {
-  // e.g. ws://localhost:8000
-  return (
-    process.env.NEXT_PUBLIC_BACKEND_WS?.replace(/\/$/, "") ||
-    `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:8000`
-  );
+  // Use current origin but switch protocol (ws/wss)
+  // Nginx proxies /api/ws to backend
+  if (process.env.NEXT_PUBLIC_BACKEND_WS) {
+    return process.env.NEXT_PUBLIC_BACKEND_WS.replace(/\/$/, "");
+  }
+
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${protocol}://${window.location.host}`;
 }
 
 export function useMultiPerspectiveChat(): ChatState {

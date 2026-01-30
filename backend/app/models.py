@@ -25,6 +25,22 @@ class RoundOutput(BaseModel):
     content: str
     timestamp: float = Field(default_factory=lambda: datetime.now().timestamp())
     tokens_used: Optional[int] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    model_used: Optional[str] = None
+    cost: Optional[float] = None
+    
+    class Config:
+        protected_namespaces = ()
+
+class CostTracking(BaseModel):
+    total_cost: float = 0.0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    model_costs: dict = Field(default_factory=dict)
+    
+    class Config:
+        protected_namespaces = ()
 
 class SessionData(BaseModel):
     session_id: UUID = Field(default_factory=uuid4)
@@ -39,16 +55,20 @@ class SessionData(BaseModel):
     
     # Debate state
     current_round: int = 0
-    max_rounds: int = 5
-    history: List[RoundOutput] = []
     
     # Error handling
     error_message: Optional[str] = None
     retry_count: int = 0
     
     # Meta Agent Data
-    selected_model: str = "deepseek"
+    selected_model: str = "glm-4.7"
     model_reasoning: Optional[str] = None
+    
+    # Cost tracking
+    cost_tracking: CostTracking = Field(default_factory=CostTracking)
+    
+    class Config:
+        protected_namespaces = ()
 
 class InitRequest(BaseModel):
     message: str
@@ -65,3 +85,4 @@ class WSMessage(BaseModel):
     agent: Optional[AgentType] = None
     state: Optional[SessionState] = None
     timestamp: float = Field(default_factory=lambda: datetime.now().timestamp())
+    cost: Optional[float] = None
