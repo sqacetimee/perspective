@@ -55,6 +55,8 @@ class SessionData(BaseModel):
     
     # Debate state
     current_round: int = 0
+    max_rounds: int = 3
+    history: List[RoundOutput] = Field(default_factory=list)
     
     # Error handling
     error_message: Optional[str] = None
