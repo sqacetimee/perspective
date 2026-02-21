@@ -48,7 +48,4 @@ python main.py
 npm run dev
 ```
 
-## 🔒 Privacy
-This system is designed with a **privacy-first** approach. All reasoning happens locally via Ollama. No user data is sent to external cloud LLMs.
-
 --*Built by David Ogunmuyiwa, Rajin Uddin, Josh Jennings, and Roan Curtis 
